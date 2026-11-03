@@ -680,6 +680,11 @@ function decorateSidebarButtons() {
 
 let skillOrbitLoginMode = "login";
 
+const skillOrbitSupabase = window.supabase.createClient(
+  "https://ttdhibdxhekdoukqxyiv.supabase.co",
+  "sb_publishable_JhUxupDL_LfOvPVhDUo8AA_SdSvqydR"
+);
+
 function toggleSkillOrbitLoginMode() {
   skillOrbitLoginMode = skillOrbitLoginMode === "login" ? "register" : "login";
   const registering = skillOrbitLoginMode === "register";
@@ -708,12 +713,6 @@ function showSkillOrbitLoginMessage(message, isError = true) {
   box.classList.toggle("is-success", !isError && Boolean(message));
 }
 
-async function hashSkillOrbitPassword(password, salt) {
-  const bytes = new TextEncoder().encode(`${salt}:${password}`);
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, "0")).join("");
-}
-
 async function handleSkillOrbitLogin(event) {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
@@ -723,45 +722,52 @@ async function handleSkillOrbitLogin(event) {
   if (!email || !password || (skillOrbitLoginMode === "register" && !name)) return;
   showSkillOrbitLoginMessage("");
 
-  let savedAccount;
-  try {
-    savedAccount = JSON.parse(localStorage.getItem("skillOrbitAccount") || "null");
-  } catch {
-    savedAccount = null;
-  }
-
   if (skillOrbitLoginMode === "register") {
-    if (password.length < 8) {
-      showSkillOrbitLoginMessage("Password must be at least 8 characters.");
+    const { data, error } = await skillOrbitSupabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: { full_name: name },
+        emailRedirectTo: `${window.location.origin}${window.location.pathname}`
+      }
+    });
+    if (error) {
+      showSkillOrbitLoginMessage(error.message);
       return;
     }
-    if (savedAccount && savedAccount.email === email) {
-      showSkillOrbitLoginMessage("This email already has an account. Please sign in.");
-      return;
-    }
-    const salt = crypto.randomUUID();
-    const passwordHash = await hashSkillOrbitPassword(password, salt);
-    localStorage.setItem("skillOrbitAccount", JSON.stringify({ name, email, salt, passwordHash }));
     document.getElementById("login-email").value = email;
     document.getElementById("login-password").value = "";
-    toggleSkillOrbitLoginMode();
-    showSkillOrbitLoginMessage("Account created. Sign in with your email and password.", false);
+    if (data.session && data.user) {
+      studentName = name;
+      localStorage.setItem("careerName", name);
+      localStorage.setItem("skillOrbitUserName", name);
+      localStorage.setItem("skillOrbitUserEmail", email);
+      enterSkillOrbit();
+      showPage("Dashboard");
+    } else {
+      toggleSkillOrbitLoginMode();
+      showSkillOrbitLoginMessage("Account created. Check your email and confirm your account, then sign in.", false);
+    }
     return;
   }
 
-  if (!savedAccount || savedAccount.email !== email) {
-    showSkillOrbitLoginMessage("Email or password is incorrect. Check your details or create an account.");
-    return;
-  }
-  const submittedHash = await hashSkillOrbitPassword(password, savedAccount.salt);
-  if (submittedHash !== savedAccount.passwordHash) {
-    showSkillOrbitLoginMessage("Email or password is incorrect. Please try again.");
+  const { data, error } = await skillOrbitSupabase.auth.signInWithPassword({ email, password });
+  if (error) {
+    const message = error.message.toLowerCase().includes("invalid login credentials")
+      ? "Email or password is incorrect. Please check and try again."
+      : error.message.toLowerCase().includes("email not confirmed")
+        ? "Please confirm your email from the message Supabase sent, then sign in."
+        : error.message;
+    showSkillOrbitLoginMessage(message);
     return;
   }
 
-  localStorage.setItem("skillOrbitUserName", savedAccount.name);
-  localStorage.setItem("skillOrbitUserEmail", savedAccount.email);
-  localStorage.setItem("skillOrbitLoggedIn", "true");
+  const user = data.user;
+  const userName = user.user_metadata?.full_name || user.user_metadata?.name || email.split("@")[0];
+  studentName = userName;
+  localStorage.setItem("careerName", userName);
+  localStorage.setItem("skillOrbitUserName", userName);
+  localStorage.setItem("skillOrbitUserEmail", user.email || email);
   enterSkillOrbit();
   showPage("Dashboard");
 }
@@ -771,7 +777,8 @@ function enterSkillOrbit() {
   document.getElementById("skillorbit-app").hidden = false;
 }
 
-function logoutSkillOrbit() {
+async function logoutSkillOrbit() {
+  await skillOrbitSupabase.auth.signOut();
   localStorage.removeItem("skillOrbitUserName");
   localStorage.removeItem("skillOrbitUserEmail");
   localStorage.removeItem("skillOrbitLoggedIn");
@@ -1573,12 +1580,25 @@ function escapeHTML(value) {
 }
 
 addQuizMenuButton();
-if (localStorage.getItem("skillOrbitLoggedIn") === "true") {
-  enterSkillOrbit();
-  showPage("Dashboard");
-} else {
+
+async function restoreSkillOrbitSession() {
+  const { data, error } = await skillOrbitSupabase.auth.getSession();
+  const user = data?.session?.user;
+  if (!error && user) {
+    const userName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Student";
+    studentName = userName;
+    localStorage.setItem("careerName", userName);
+    localStorage.setItem("skillOrbitUserName", userName);
+    localStorage.setItem("skillOrbitUserEmail", user.email || "");
+    enterSkillOrbit();
+    showPage("Dashboard");
+    return;
+  }
   document.getElementById("login-screen").hidden = false;
+  document.getElementById("skillorbit-app").hidden = true;
 }
+
+restoreSkillOrbitSession();
 
 
 
