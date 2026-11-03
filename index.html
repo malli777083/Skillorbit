@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SkillOrbit</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <section class="login-screen" id="login-screen">
+    <form class="login-card" id="login-form" onsubmit="handleSkillOrbitLogin(event)">
+      <div class="login-brand-mark" aria-hidden="true">✦</div>
+      <p class="login-eyebrow">WELCOME TO</p>
+      <h1>SkillOrbit</h1>
+      <p class="login-tagline">Find Your Strength. Build Your Future.</p>
+      <div class="login-divider"></div>
+      <h2 id="login-heading">Sign in to continue</h2>
+      <div id="login-name-field" hidden>
+        <label for="login-name">Your name</label>
+        <input id="login-name" name="name" type="text" placeholder="Enter your name" autocomplete="name" disabled>
+      </div>
+      <label for="login-email">Email address</label>
+      <input id="login-email" name="email" type="email" placeholder="you@example.com" autocomplete="email" required>
+      <label for="login-password">Password</label>
+      <input id="login-password" name="password" type="password" placeholder="Enter your password" autocomplete="current-password" required>
+      <label class="show-password-option" for="show-login-password">
+        <input id="show-login-password" type="checkbox" onchange="toggleSkillOrbitPasswordVisibility()">
+        <span>Show password</span>
+      </label>
+      <button class="login-submit" id="login-submit" type="submit">Sign in to SkillOrbit</button>
+      <p class="login-error" id="login-error" role="alert" aria-live="polite"></p>
+      <p class="login-note" id="login-note">New here? Create an account first.</p>
+      <button class="login-toggle" id="login-toggle" type="button" onclick="toggleSkillOrbitLoginMode()">Create account</button>
+    </form>
+  </section>
+
+  <div class="app" id="skillorbit-app" hidden>
+    <aside class="sidebar">
+      <h2>SkillOrbit</h2>
+      <p>Find Your Strength. Build Your Future.</p>
+
+      <button onclick="showPage('Dashboard')">Dashboard</button>
+      <button onclick="showPage('My Profile')">My Profile</button>
+      <button onclick="showPage('My Skills')">My Skills</button>
+      <button onclick="showPage('Companies')">Companies</button>
+      <button onclick="showPage('Job Roles')">Job Roles</button>
+      <button onclick="showPage('Skill Match')">Skill Match</button>
+      <button onclick="showPage('Skill Gap')">Skill Gap</button>
+      <button onclick="showPage('Learning Center')">Learning Center</button>
+      <button onclick="showPage('Projects')">Projects</button>
+      <button onclick="showPage('Career Roadmap')">Career Roadmap</button>
+      <button onclick="logoutSkillOrbit()">Log out</button>
+    </aside>
+
+    <main class="content">
+      <header class="page-heading">
+        <div class="page-heading-copy">
+          <h1 id="page-title">Welcome to CareerAI</h1>
+          <p>Build skills. Find your career path.</p>
+        </div>
+        <div id="page-illustration" aria-live="polite"></div>
+      </header>
+      <div id="page-content"></div>
+    </main>
+  </div>
+
+  <script src="script.js"></script>
+</body>
+</html>
