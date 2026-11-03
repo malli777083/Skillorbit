@@ -713,6 +713,68 @@ function showSkillOrbitLoginMessage(message, isError = true) {
   box.classList.toggle("is-success", !isError && Boolean(message));
 }
 
+function parseSavedSkills(value) {
+  if (Array.isArray(value)) return value;
+  try {
+    const parsed = JSON.parse(value || "[]");
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return String(value || "").split(",").map(skill => skill.trim()).filter(Boolean);
+  }
+}
+
+function syncStudentProfileToLocalStorage() {
+  localStorage.setItem("careerName", studentName);
+  localStorage.setItem("careerGoal", careerGoal);
+  localStorage.setItem("careerStudyYear", studyYear);
+  localStorage.setItem("careerSkills", JSON.stringify(mySkills));
+}
+
+async function saveStudentProfileToSupabase() {
+  const { data, error: sessionError } = await skillOrbitSupabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = data.session?.user;
+  if (!user) throw new Error("Please sign in again before saving your profile.");
+
+  const { error } = await skillOrbitSupabase.from("student_profiles").upsert({
+    user_id: user.id,
+    full_name: studentName,
+    career_goal: careerGoal,
+    study_year: String(studyYear),
+    skills: JSON.stringify(mySkills)
+  });
+  if (error) throw error;
+}
+
+async function loadStudentProfileFromSupabase(user) {
+  const { data: profile, error } = await skillOrbitSupabase
+    .from("student_profiles")
+    .select("full_name, career_goal, study_year, skills")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  if (error) throw error;
+
+  if (profile) {
+    studentName = profile.full_name || user.user_metadata?.full_name || user.email?.split("@")[0] || "Student";
+    careerGoal = profile.career_goal || "Data Scientist";
+    studyYear = profile.study_year || "1";
+    mySkills = parseSavedSkills(profile.skills);
+  } else {
+    studentName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Student";
+    careerGoal = "Data Scientist";
+    studyYear = "1";
+    mySkills = [];
+    await saveStudentProfileToSupabase();
+  }
+
+  syncStudentProfileToLocalStorage();
+}
+
+function showProfileSaveError(error) {
+  console.error("SkillOrbit profile save failed:", error);
+  alert(`Your changes could not be saved to your account. ${error?.message || "Please try again."}`);
+}
+
 async function handleSkillOrbitLogin(event) {
   event.preventDefault();
   const formData = new FormData(event.currentTarget);
@@ -738,8 +800,12 @@ async function handleSkillOrbitLogin(event) {
     document.getElementById("login-email").value = email;
     document.getElementById("login-password").value = "";
     if (data.session && data.user) {
-      studentName = name;
-      localStorage.setItem("careerName", name);
+      try {
+        await loadStudentProfileFromSupabase(data.user);
+      } catch (profileError) {
+        showProfileSaveError(profileError);
+        studentName = name;
+      }
       localStorage.setItem("skillOrbitUserName", name);
       localStorage.setItem("skillOrbitUserEmail", email);
       enterSkillOrbit();
@@ -764,9 +830,13 @@ async function handleSkillOrbitLogin(event) {
 
   const user = data.user;
   const userName = user.user_metadata?.full_name || user.user_metadata?.name || email.split("@")[0];
-  studentName = userName;
-  localStorage.setItem("careerName", userName);
-  localStorage.setItem("skillOrbitUserName", userName);
+  try {
+    await loadStudentProfileFromSupabase(user);
+  } catch (profileError) {
+    showProfileSaveError(profileError);
+    studentName = userName;
+  }
+  localStorage.setItem("skillOrbitUserName", studentName);
   localStorage.setItem("skillOrbitUserEmail", user.email || email);
   enterSkillOrbit();
   showPage("Dashboard");
@@ -1494,31 +1564,43 @@ function nextQuizQuestion() {
   quizIndex++;
   showQuiz();
 }
-function saveProfile() {
+async function saveProfile() {
   studentName = document.getElementById("nameInput").value.trim() || "Student";
   careerGoal = document.getElementById("goalInput").value;
   studyYear = document.getElementById("studyYearInput").value;
 
-  localStorage.setItem("careerName", studentName);
-  localStorage.setItem("careerGoal", careerGoal);
-  localStorage.setItem("careerStudyYear", studyYear);
+  syncStudentProfileToLocalStorage();
+  try {
+    await saveStudentProfileToSupabase();
+  } catch (error) {
+    showProfileSaveError(error);
+  }
   showPage("My Profile");
 }
 
-function setCareerGoal(role) {
+async function setCareerGoal(role) {
   careerGoal = role;
-  localStorage.setItem("careerGoal", careerGoal);
-  localStorage.setItem("careerStudyYear", studyYear);
+  syncStudentProfileToLocalStorage();
+  try {
+    await saveStudentProfileToSupabase();
+  } catch (error) {
+    showProfileSaveError(error);
+  }
   showPage("My Profile");
 }
 
-function saveSkills() {
+async function saveSkills() {
   const selected = [...document.querySelectorAll('input[name="skillOption"]:checked')]
     .map(input => input.value);
   const other = document.getElementById("otherSkillsInput").value
     .split(",").map(skill => skill.trim()).filter(Boolean);
   mySkills = [...new Set([...selected, ...other])];
-  localStorage.setItem("careerSkills", JSON.stringify(mySkills));
+  syncStudentProfileToLocalStorage();
+  try {
+    await saveStudentProfileToSupabase();
+  } catch (error) {
+    showProfileSaveError(error);
+  }
   showPage("My Skills");
 }
 function calculateMatch() {
@@ -1585,10 +1667,13 @@ async function restoreSkillOrbitSession() {
   const { data, error } = await skillOrbitSupabase.auth.getSession();
   const user = data?.session?.user;
   if (!error && user) {
-    const userName = user.user_metadata?.full_name || user.user_metadata?.name || user.email?.split("@")[0] || "Student";
-    studentName = userName;
-    localStorage.setItem("careerName", userName);
-    localStorage.setItem("skillOrbitUserName", userName);
+    try {
+      await loadStudentProfileFromSupabase(user);
+    } catch (profileError) {
+      showProfileSaveError(profileError);
+      studentName = user.user_metadata?.full_name || user.email?.split("@")[0] || "Student";
+    }
+    localStorage.setItem("skillOrbitUserName", studentName);
     localStorage.setItem("skillOrbitUserEmail", user.email || "");
     enterSkillOrbit();
     showPage("Dashboard");
