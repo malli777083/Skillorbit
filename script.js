@@ -1316,6 +1316,7 @@ function submitProject(event, id) {
     submittedAt: new Date().toISOString()
   };
   saveProjects();
+  addQuizMenuButton();
   showPage("Projects");
 }
 
