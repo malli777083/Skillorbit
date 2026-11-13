@@ -1397,17 +1397,79 @@ function showCodingPractice() {
     <p>${escapeHTML(question.task)}</p>${question.sample ? `<pre>${escapeHTML(question.sample)}</pre>` : ""}
     <label for="practiceCode">Your code:</label>
     <textarea id="practiceCode" rows="14" spellcheck="false" oninput="savePracticeDraft(true)" style="width:100%;font-family:monospace">${escapeHTML(savedCode)}</textarea>
-    <p><button onclick="savePracticeDraft()">Save my code</button>
+    <label for="practiceInput">Program input (optional):</label>
+    <textarea id="practiceInput" rows="3" spellcheck="false" placeholder="Type input your program asks for" style="width:100%;font-family:monospace"></textarea>
+    <p><button id="runPracticeButton" onclick="runPracticeCode()">Run code</button>
+    <button onclick="savePracticeDraft()">Save my code</button>
     <button onclick="showPracticeHint()">Show hint</button>
     ${question.solution ? `<button onclick="showPracticeSolution()">Show solution</button>` : ""}
     <button onclick="selectPracticeQuestion(${Math.max(0, selectedPracticeQuestionIndex - 1)})" ${selectedPracticeQuestionIndex === 0 ? "disabled" : ""}>Previous</button>
     <button onclick="selectPracticeQuestion(${Math.min(4, selectedPracticeQuestionIndex + 1)})" ${selectedPracticeQuestionIndex === 4 ? "disabled" : ""}>Next question</button>
     <button onclick="selectPracticeExercise(-1)">Back to programs</button></p>
     <p>Question ${selectedPracticeQuestionIndex + 1} / 5</p>
-    <p id="practiceMessage" aria-live="polite">Drafts save in this browser. Copy your code to VS Code to compile and run it.</p>
+    <p id="practiceMessage" aria-live="polite">Write code, add input if needed, then press Run code. Your source code is sent to the online compiler.</p>
+    <pre id="practiceOutput" aria-live="polite" style="white-space:pre-wrap;overflow:auto;background:#f5f7f8;padding:12px;border-radius:8px;min-height:56px">Output will appear here.</pre>
     <div id="practiceHelp"></div></div>`;
 }
 
+async function runPracticeCode() {
+  const codeBox = document.getElementById("practiceCode");
+  const inputBox = document.getElementById("practiceInput");
+  const outputBox = document.getElementById("practiceOutput");
+  const runButton = document.getElementById("runPracticeButton");
+  const languageIds = {"C": 103, "C++": 105, "Java": 91};
+  const languageId = languageIds[selectedPracticeLanguage];
+  if (!codeBox || !outputBox || !languageId) return;
+  const code = codeBox.value.trim();
+  if (!code) {
+    outputBox.textContent = "Write your program first, then press Run code.";
+    return;
+  }
+
+  runButton.disabled = true;
+  runButton.textContent = "Running…";
+  outputBox.textContent = "Compiling and running your program…";
+  try {
+    const createResponse = await fetch("https://ce.judge0.com/submissions/?base64_encoded=false&wait=false", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        language_id: languageId,
+        source_code: code,
+        stdin: inputBox ? inputBox.value : "",
+        cpu_time_limit: 3,
+        wall_time_limit: 5
+      })
+    });
+    const created = await createResponse.json();
+    if (!createResponse.ok || !created.token) {
+      throw new Error(created.error || created.message || "The compiler could not accept this run. Try again in a moment.");
+    }
+
+    let result = null;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      const checkResponse = await fetch(`https://ce.judge0.com/submissions/${encodeURIComponent(created.token)}?base64_encoded=false&fields=stdout,stderr,compile_output,message,status`);
+      const current = await checkResponse.json();
+      if (!checkResponse.ok) throw new Error(current.error || current.message || "Could not get the run result.");
+      if (current.status && current.status.id > 2) {
+        result = current;
+        break;
+      }
+    }
+    if (!result) throw new Error("This run is taking too long. Please press Run code again.");
+
+    const output = [result.compile_output, result.stdout, result.stderr, result.message]
+      .filter(value => value && value.trim())
+      .join("\n");
+    outputBox.textContent = `${result.status?.description || "Finished"}\n\n${output || "Program finished with no output."}`;
+  } catch (error) {
+    outputBox.textContent = `Could not run the code: ${error.message}\nCheck your internet connection and try again.`;
+  } finally {
+    runButton.disabled = false;
+    runButton.textContent = "Run code";
+  }
+}
 function getPracticeQuestions(exercise) {
   return [
     {task: exercise.task, sample: exercise.sample, hint: exercise.hint, solution: exercise.solution},
