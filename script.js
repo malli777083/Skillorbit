@@ -337,7 +337,7 @@ function showPage(pageName) {
             <p>Your career goal: ${escapeHTML(careerGoal)} (${escapeHTML(getCareerDomain(careerGoal))})</p>
             <p>Study year: ${escapeHTML(yearLabel(studyYear))}</p>
             <button onclick="showPage('Skill Gap')">See skills to improve</button>
-            <p>Choose projects you like, complete three, then take the quiz.</p>
+            <p>Choose projects to build your portfolio. Practice & Quiz is available anytime.</p>
           </div>
           <div class="dashboard-illustration" role="img" aria-label="Data science dashboard with charts and career progress">
             <svg viewBox="0 0 340 230" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -506,10 +506,10 @@ function showPage(pageName) {
   } else if (pageName === "Projects") {
     content.innerHTML = `
       <h3>Choose projects you like</h3>
-      <p>Choose a project, build it, then submit your project link and a short explanation. Three submitted projects unlock the quiz.</p>
+      <p>Choose a project, build it, then submit your project link and a short explanation. Practice & Quiz and Coding Practice are available before you start projects.</p>
       <div class="card">
         <b>Completed: ${completedProjectCount()} / 3</b>
-        <p>${quizIsUnlocked() ? "Quiz unlocked!" : "Complete three projects to unlock Practice & Quiz."}</p>
+        <p>Practice & Quiz and Coding Practice are available before projects.</p>
       </div>
       <div class="grid">
         ${projectCatalog.map(project => {
@@ -564,21 +564,22 @@ function showPage(pageName) {
       </div>
 
       <div class="card">
-        <h3>Step 3 — Choose projects you like</h3>
+        <h3>Step 3 — Practice & Quiz</h3>
+        <p>Start the quiz now. You do not need to finish a project first.</p>
+        <button onclick="showPage('Practice & Quiz')">Start quiz</button>
+      </div>
+
+      <div class="card">
+        <h3>Step 4 — Coding Practice</h3>
+        <p>Practice C, C++ and Java at your own level before starting projects.</p>
+        <button onclick="showPage('Coding Practice')">Start coding practice</button>
+      </div>
+
+      <div class="card">
+        <h3>Step 5 — Build projects</h3>
+        <p>Progress: ${done} / 3 submitted</p>
         <p>${chosenProjectCount()} project(s) chosen.</p>
         <button onclick="showPage('Projects')">Explore projects</button>
-      </div>
-
-      <div class="card">
-        <h3>Step 4 — Complete three projects</h3>
-        <p>Progress: ${done} / 3 completed</p>
-        <button onclick="showPage('Projects')">Continue projects</button>
-      </div>
-
-      <div class="card">
-        <h3>Step 5 — Take the quiz</h3>
-        <p>${quizIsUnlocked() ? "Ready! The quiz is unlocked." : "The quiz unlocks after three projects are marked complete."}</p>
-        ${quizIsUnlocked() ? `<button onclick="startQuiz()">Start quiz</button>` : ""}
       </div>
     `;
 
@@ -1339,12 +1340,12 @@ function completedProjectCount() {
 }
 
 function quizIsUnlocked() {
-  return completedProjectCount() >= 3;
+  return true;
 }
 
 function addQuizMenuButton() {
   const sidebar = document.querySelector(".sidebar");
-  if (!sidebar || !quizIsUnlocked()) return;
+  if (!sidebar) return;
 
   if (!document.getElementById("quizMenuButton")) {
     const button = document.createElement("button");
