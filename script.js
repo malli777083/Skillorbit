@@ -157,6 +157,86 @@ let selectedPracticeLanguage = "";
 let selectedPracticeLevel = "";
 let selectedPracticeIndex = -1;
 let selectedPracticeQuestionIndex = 0;
+let accountDataOwnerId = "";
+let practiceDraftSaveTimer = null;
+let quizAttemptSaved = false;
+
+const accountDataKinds = ["projects", "internships", "resume", "practice_drafts", "quiz_attempts"];
+
+function showAccountDataSaveError(error) {
+  console.error("SkillOrbit account data save failed:", error);
+  alert(`Could not save this to your account. ${error?.message || "Please try again."}`);
+}
+
+async function saveAccountData(kind, data) {
+  const { data: sessionData, error: sessionError } = await skillOrbitSupabase.auth.getSession();
+  if (sessionError) throw sessionError;
+  const user = sessionData.session?.user;
+  if (!user) throw new Error("Please sign in again before saving.");
+  const { error } = await skillOrbitSupabase.from("skillorbit_user_data").upsert({
+    user_id: user.id,
+    data_kind: kind,
+    data
+  }, { onConflict: "user_id,data_kind" });
+  if (error) throw error;
+}
+
+function readLocalAccountData(kind) {
+  const keys = {
+    projects: "careerProjects",
+    internships: "careerInternships",
+    resume: "careerResumeProfile",
+    practice_drafts: "careerPracticeDrafts",
+    quiz_attempts: "careerQuizAttempts"
+  };
+  try {
+    const raw = localStorage.getItem(keys[kind]);
+    return raw ? JSON.parse(raw) : (kind === "projects" ? {} : []);
+  } catch (_) {
+    return kind === "projects" ? {} : [];
+  }
+}
+
+function applyAccountData(kind, data) {
+  if (kind === "projects") myProjects = data && typeof data === "object" ? data : {};
+  if (kind === "internships") internshipRecords = Array.isArray(data) ? data : [];
+  if (kind === "resume") localStorage.setItem("careerResumeProfile", JSON.stringify(data || null));
+  if (kind === "practice_drafts") localStorage.setItem("careerPracticeDrafts", JSON.stringify(data || {}));
+  if (kind === "quiz_attempts") localStorage.setItem("careerQuizAttempts", JSON.stringify(Array.isArray(data) ? data : []));
+  if (kind === "projects") localStorage.setItem("careerProjects", JSON.stringify(myProjects));
+  if (kind === "internships") localStorage.setItem("careerInternships", JSON.stringify(internshipRecords));
+}
+
+async function loadAccountDataFromSupabase(user) {
+  const { data: rows, error } = await skillOrbitSupabase
+    .from("skillorbit_user_data")
+    .select("data_kind, data")
+    .eq("user_id", user.id);
+  if (error) throw error;
+
+  const localOwnerId = localStorage.getItem("skillOrbitDataOwnerId");
+  const mayMigrateLocalData = !localOwnerId || localOwnerId === user.id;
+  const cloudKinds = new Set((rows || []).map(row => row.data_kind));
+  for (const kind of accountDataKinds) {
+    const cloudRow = (rows || []).find(row => row.data_kind === kind);
+    if (cloudRow) {
+      applyAccountData(kind, cloudRow.data);
+    } else if (mayMigrateLocalData) {
+      const localData = readLocalAccountData(kind);
+      applyAccountData(kind, localData);
+      const hasData = kind === "projects" ? Object.keys(localData || {}).length > 0
+        : kind === "resume" ? Boolean(localData)
+          : Array.isArray(localData) ? localData.length > 0
+            : Object.keys(localData || {}).length > 0;
+      if (hasData) await saveAccountData(kind, localData);
+    } else {
+      const emptyData = kind === "projects" ? {} : kind === "resume" ? null : [];
+      applyAccountData(kind, emptyData);
+    }
+  }
+  localStorage.setItem("skillOrbitDataOwnerId", user.id);
+  accountDataOwnerId = user.id;
+}
 
 const languageQuizQuestions = {
   "C": [
@@ -803,8 +883,9 @@ async function handleSkillOrbitLogin(event) {
     if (data.session && data.user) {
       try {
         await loadStudentProfileFromSupabase(data.user);
+        await loadAccountDataFromSupabase(data.user);
       } catch (profileError) {
-        showProfileSaveError(profileError);
+        showAccountDataSaveError(profileError);
         studentName = name;
       }
       localStorage.setItem("skillOrbitUserName", name);
@@ -833,8 +914,9 @@ async function handleSkillOrbitLogin(event) {
   const userName = user.user_metadata?.full_name || user.user_metadata?.name || email.split("@")[0];
   try {
     await loadStudentProfileFromSupabase(user);
+    await loadAccountDataFromSupabase(user);
   } catch (profileError) {
-    showProfileSaveError(profileError);
+    showAccountDataSaveError(profileError);
     studentName = userName;
   }
   localStorage.setItem("skillOrbitUserName", studentName);
@@ -850,6 +932,7 @@ function enterSkillOrbit() {
 
 async function logoutSkillOrbit() {
   await skillOrbitSupabase.auth.signOut();
+  accountDataOwnerId = "";
   localStorage.removeItem("skillOrbitUserName");
   localStorage.removeItem("skillOrbitUserEmail");
   localStorage.removeItem("skillOrbitLoggedIn");
@@ -1042,7 +1125,7 @@ function renderInternshipsPage() {
   `;
 }
 
-function recordInternshipCompletion() {
+async function recordInternshipCompletion() {
   const company = document.getElementById("internshipCompanyInput").value;
   const role = document.getElementById("internshipRoleInput").value.trim();
   const completionDate = document.getElementById("internshipDateInput").value;
@@ -1061,6 +1144,8 @@ function recordInternshipCompletion() {
     issuedDate: new Date().toISOString().slice(0, 10)
   });
   localStorage.setItem("careerInternships", JSON.stringify(internshipRecords));
+  try { await saveAccountData("internships", internshipRecords); }
+  catch (error) { showAccountDataSaveError(error); }
   showPage("My Certificates");
 }
 
@@ -1171,13 +1256,13 @@ function renderResumeBuilder() {
         <label>GitHub / Portfolio link<input id="resumePortfolio" type="url" value="${escapeHTML(data.portfolio)}"></label>
         <button type="submit">Save details and create preview</button>
       </form>
-      <p><small>Your resume details are stored in this browser on this device.</small></p>
+      <p><small>Your saved resume is linked to your SkillOrbit account and can be opened after signing in on another device.</small></p>
     </div>
     ${savedData ? renderResumePreview(savedData) : `<div class="card"><p>Complete the form and select <b>Save details and create preview</b> to see your resume here.</p></div>`}
   `;
 }
 
-function saveResumeProfile(event) {
+async function saveResumeProfile(event) {
   event.preventDefault();
   const ids = {
     name:"resumeName", email:"resumeEmail", phone:"resumePhone", location:"resumeLocation",
@@ -1187,6 +1272,8 @@ function saveResumeProfile(event) {
   };
   const data = Object.fromEntries(Object.entries(ids).map(([key,id]) => [key, document.getElementById(id).value.trim()]));
   localStorage.setItem("careerResumeProfile", JSON.stringify(data));
+  try { await saveAccountData("resume", data); }
+  catch (error) { showAccountDataSaveError(error); }
   studentName = data.name || studentName;
   localStorage.setItem("careerName", studentName);
   renderResumeBuilder();
@@ -1287,14 +1374,14 @@ function renderCompanyDetails() {
     </div>
   `;
 }
-function chooseProject(id) {
+async function chooseProject(id) {
   myProjects[id] = myProjects[id] || {};
   myProjects[id].chosen = true;
-  saveProjects();
+  await saveProjects();
   showPage("Projects");
 }
 
-function submitProject(event, id) {
+async function submitProject(event, id) {
   event.preventDefault();
   const projectUrl = document.getElementById(`project-url-${id}`).value.trim();
   const summary = document.getElementById(`project-summary-${id}`).value.trim();
@@ -1316,19 +1403,21 @@ function submitProject(event, id) {
     summary,
     submittedAt: new Date().toISOString()
   };
-  saveProjects();
+  await saveProjects();
   addQuizMenuButton();
   showPage("Projects");
 }
 
-function editProjectSubmission(id) {
+async function editProjectSubmission(id) {
   myProjects[id] = {...myProjects[id], completed: false};
-  saveProjects();
+  await saveProjects();
   showPage("Projects");
 }
 
-function saveProjects() {
+async function saveProjects() {
   localStorage.setItem("careerProjects", JSON.stringify(myProjects));
+  try { await saveAccountData("projects", myProjects); }
+  catch (error) { showAccountDataSaveError(error); }
 }
 
 function chosenProjectCount() {
@@ -1392,7 +1481,8 @@ function showCodingPractice() {
   const questions = getPracticeQuestions(exercise);
   const question = questions[selectedPracticeQuestionIndex];
   const draftKey = `careerCode_${selectedPracticeLanguage}_${selectedPracticeLevel}_${selectedPracticeIndex}_${selectedPracticeQuestionIndex}`;
-  const savedCode = localStorage.getItem(draftKey) || exercise.starter;
+  const allDrafts = readLocalAccountData("practice_drafts");
+  const savedCode = allDrafts[draftKey] || localStorage.getItem(draftKey) || exercise.starter;
   content.innerHTML = `<div class="card"><h3>${escapeHTML(exercise.title)} — Question ${selectedPracticeQuestionIndex + 1} of 5</h3>
     <p>${escapeHTML(question.task)}</p>${question.sample ? `<pre>${escapeHTML(question.sample)}</pre>` : ""}
     <label for="practiceCode">Your code:</label>
@@ -1504,8 +1594,17 @@ function selectPracticeQuestion(index) {
 }
 function savePracticeDraft(silent = false) {
   const key = `careerCode_${selectedPracticeLanguage}_${selectedPracticeLevel}_${selectedPracticeIndex}_${selectedPracticeQuestionIndex}`;
-  localStorage.setItem(key, document.getElementById("practiceCode").value);
-  if (!silent) document.getElementById("practiceMessage").textContent = "Code draft saved in this browser.";
+  const code = document.getElementById("practiceCode").value;
+  localStorage.setItem(key, code);
+  const allDrafts = readLocalAccountData("practice_drafts");
+  allDrafts[key] = code;
+  localStorage.setItem("careerPracticeDrafts", JSON.stringify(allDrafts));
+  if (practiceDraftSaveTimer) clearTimeout(practiceDraftSaveTimer);
+  practiceDraftSaveTimer = setTimeout(async () => {
+    try { await saveAccountData("practice_drafts", allDrafts); }
+    catch (error) { showAccountDataSaveError(error); }
+  }, silent ? 1200 : 0);
+  if (!silent) document.getElementById("practiceMessage").textContent = "Code draft saved to your SkillOrbit account.";
 }
 function showPracticeHint() {
   const exercise = codingChallenges[selectedPracticeLanguage][selectedPracticeLevel][selectedPracticeIndex];
@@ -1522,6 +1621,7 @@ function startQuiz(language = "", level = "") {
   quizScore = 0;
   quizAnswered = false;
   quizReview = [];
+  quizAttemptSaved = false;
   selectedQuizLanguage = language;
   selectedQuizLevel = level;
   activeQuizQuestions = level
@@ -1626,6 +1726,20 @@ function answerQuiz(choiceIndex) {
 function nextQuizQuestion() {
   if (!quizAnswered) return;
   quizIndex++;
+  if (quizIndex >= activeQuizQuestions.length && !quizAttemptSaved) {
+    quizAttemptSaved = true;
+    const attempts = readLocalAccountData("quiz_attempts");
+    attempts.push({
+      language: selectedQuizLanguage,
+      level: selectedQuizLevel,
+      score: quizScore,
+      total_questions: activeQuizQuestions.length,
+      answers: quizReview,
+      completed_at: new Date().toISOString()
+    });
+    localStorage.setItem("careerQuizAttempts", JSON.stringify(attempts));
+    saveAccountData("quiz_attempts", attempts).catch(showAccountDataSaveError);
+  }
   showQuiz();
 }
 async function saveProfile() {
@@ -1733,8 +1847,9 @@ async function restoreSkillOrbitSession() {
   if (!error && user) {
     try {
       await loadStudentProfileFromSupabase(user);
+      await loadAccountDataFromSupabase(user);
     } catch (profileError) {
-      showProfileSaveError(profileError);
+      showAccountDataSaveError(profileError);
       studentName = user.user_metadata?.full_name || user.email?.split("@")[0] || "Student";
     }
     localStorage.setItem("skillOrbitUserName", studentName);
